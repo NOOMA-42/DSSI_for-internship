@@ -1,0 +1,180 @@
+---
+title: "AS03_join_edu_data"
+author: "Jilung Hsieh"
+date: "9/25/2019"
+output:
+  html_document:
+    highlight: zenburn
+    number_sections: no
+    theme: cerulean
+    toc: yes
+    css: style.css
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(tidyverse)
+library(readr)
+options(stringsAsFactors = F)
+```
+
+# Q1 Joining educational data
+- Reading educational data from the following csv file.
+
+## Reading education data
+```{r}
+raw2 <- read_csv("data/opendata107Y020.csv") %>%
+    slice(-1) %>%
+    glimpse()
+```
+
+
+## Town level educational data 
+- Original data is village-level data
+- Following In-Class tutorial, using `group_by()` to create town-level statistical data.
+```{r}
+tidydata2 <- raw2 %>%
+  gather("key", "value", 6:ncol(.)) %>%
+  mutate(key = str_replace(key, "edu_", "")) %>%
+  mutate(key = str_replace(key, "juniorcollege_2ys", "juniorcollege2ys")) %>%
+  mutate(key = str_replace(key, "juniorcollege_5ys_final2y", "juniorcollege5ysfinal2y")) %>%
+  mutate(key = str_replace(key, "juniorcollege_5ys_first3y", "juniorcollege5ysfirst3y")) %>%
+  mutate(key = str_replace(key, "illiterate_", "illiterate_NA_")) %>%
+  mutate(key = str_replace(key, "selftaughtl_", "selftaughtl_NA_")) %>%
+  mutate(key = str_replace(key, "juniorcollege_5ys_first3y_ungraduated", "juniorcollege5ysfirst3y_ungraduated")) %>%
+  separate(key, c("education", "grad_status", "gender"))
+```
+
+```{r}
+town_edu <- tidydata2 %>%
+  select(-village) %>%
+  mutate(value = as.numeric(value), edu_age_15up_total = as.numeric(edu_age_15up_total)) %>%
+  group_by(site_id) %>%
+  summarize(
+    male_total = sum(value[gender=="m"]),
+    female_total = sum(value[gender=="f"]),
+    edu_above_junior = sum(value[education=="university" | education=="master" | education=="doctor"])
+  ) %>%
+  arrange(edu_above_junior)
+```
+
+
+## Add code chunks as you need here.
+
+## Loading town-level age, marriage, and referendum data
+- Loading town-level data created in class
+
+```{r}
+town_stat <- read_rds("./data/hw3/town_stat.rds")
+town_ref10 <- read_rds("./data/hw3/town_ref10.rds")
+```
+
+
+
+## Joining data together
+- Joining all town-leave data together (Including new educational dada, and age, marriage, referendum data introduced in class)
+```{r}
+town_edu_ref10_stat <- town_edu %>%
+  right_join(town_stat, by="site_id") %>%
+  right_join(town_ref10, by=c("site_id"="townfull")) 
+```
+
+## **Q1 Ans: Joined data dimension**
+- using `dim()` to display data dimension (should be 368). TAs will score Q1 according to the outcome.
+```{r}
+dim(town_edu_ref10_stat)
+```
+
+
+## **Q1 Ans: glimpse()**
+- Using `glimpse()` to print out data you join below. TAs will score Q1 according to the `glimpse()` outcome.
+```{r}
+glimpse(town_edu_ref10_stat)
+```
+
+# Q2 Open Question - Joining one more dimension
+- TASK: Collecting one more dimension from open data for town level and join it with the eucation, married, age, and referendum data.
+
+## Read the file
+```{r}
+folder <- './data/hw3/'
+file <- list.files(folder, pattern="*.csv")
+raw <- lapply(paste0(folder, file), read_csv, skip=1)
+data <- bind_rows(raw)
+data <- na.omit(data)
+```
+
+## Display the data dimension of the file
+```{r}
+dim(data)
+```
+
+## aggregate and make it into town level
+```{r}
+names(data) <- c("type", "y", "place")
+crime_data <- data %>%
+  select(-2) %>%
+  group_by(place) %>%
+  summarize(
+    crime_total = n()
+  )
+```
+
+
+## **Q2 Ans: Answer following questions**
+- Data source link (the page you download the data): 
+- Describe the data source in your words: 
+
+# https://data.moi.gov.tw/MoiOD/Data/DataDetail.aspx?oid=AC4C5CF9-682A-450A-8405-45706B8C9588
+- 提供毒品、強盜、搶奪、住宅盜竊、汽車竊盜、機車竊盜、強制性交等8案類犯罪發生資料 (本資料為每季初步統計，僅供參考，正確統計數字仍以本署年度刑案統計資料為準。)(自107年10月起提供組織犯罪案類資料。) 資料年度為107年度整年
+
+## **Q2 Ans: Dim() of joined data frame**
+
+```{r}
+town_edu_ref10_stat_crime <- town_edu_ref10_stat %>%
+  left_join(crime_data, by=c("site_id"= "place")) 
+dim(town_edu_ref10_stat_crime)
+```
+
+
+## **Q2 Ans: glimpse() of joined data frame**
+```{r}
+glimpse(town_edu_ref10_stat_crime) 
+```
+
+# Q3 Open question - Linear regression
+ - Now, you have age, marriage, and education as indenpendent variables and referendum 10th agreement as the dependent variable.
+ - Go online and search how to run regression with R
+ - Report the regression result 
+
+## **Q3 Ans**
+```{r}
+linearMod <- lm(crime_total ~ edu_above_junior, data=town_edu_ref10_stat_crime)  
+# build linear regression model on full data
+
+# code for print out regression result 
+linearMod
+plot(x = town_edu_ref10_stat_crime$edu_above_junior, y = town_edu_ref10_stat_crime$crime_total, xlab = "edu_above_junior", ylab = "crime_total", main = "Education level and crime rate")
+abline(linearMod)
+```
+
+
+
+# Q4 Challenge: The median of grouped data
+- Calculating age median of grouped data
+- Reference: https://www.themathdoctors.org/finding-the-median-of-grouped-data/
+- Solve it wit dplyr pkgs
+- If you can't answer the question correctly, keep your code (even wrong) to get partial scores.
+
+## **Q4 Ans: glimpse()**
+```{r}
+
+#glimpse(YOUR_DATA_FRAME_NAME)
+```
+

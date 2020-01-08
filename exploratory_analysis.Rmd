@@ -1,0 +1,127 @@
+---
+title: "feature_selection"
+author: "Paul"
+date: "12/19/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(dplyr)
+library(stringr)
+library(tidytext)
+library(tidyverse)
+library(igraph)
+library(ggraph)
+library(topicmodels)
+```
+
+
+```{r}
+train <- readRDS("clean_train.rds")
+
+tokend_train <- train %>% 
+    unnest_tokens(word, review_ext)
+
+```
+
+#sentiment analysis
+```{r}
+senti_train <- tokend_train %>%
+    left_join(get_sentiments("bing")) %>%
+    count(id, sentiment) %>%
+    spread(sentiment, n, fill=0) %>%
+    mutate(sentiment = positive - negative)
+
+#detect outlier
+senti_train %>%
+    ggplot(aes(id, sentiment)) + 
+    geom_col()
+
+#outlier removal
+senti_train <- senti_train[-(senti_train$sentiment %>% which.min()),]
+
+senti_train %>%
+    ggplot(aes(id, sentiment)) + 
+    geom_col()
+```
+
+#tf-idf
+```{r}
+tf_idf_train <- tokend_train %>%
+    count(game_type, word) %>%
+    bind_tf_idf(word, game_type, n) %>%
+    arrange(tf_idf %>% desc)
+
+tf_idf_train %>%
+    mutate(word = factor(word, levels = rev(unique(word)))) %>%
+    group_by(game_type) %>%
+    top_n(10) %>%
+    ggplot(aes(word, tf_idf, fill=game_type)) +
+    geom_col() + 
+    labs(x=NULL, y="tf-idf") + 
+    facet_wrap(~game_type, ncol=2, scales = "free") + 
+    coord_flip()
+```
+
+```{r}
+tf_idf_train %>% filter(word == "ubisoft" | word == "ending")
+```
+
+#network
+```{r}
+bigrams <- train %>%
+  unnest_tokens(bigram, review_ext, token = "ngrams", n = 2)
+bigrams
+
+bigrams %>%
+    count(bigram, sort=T)
+
+bigrams_separated <- bigrams %>%
+    separate(bigram, c("word1", "word2"), sep=" ")
+
+bigrams_filtered <- bigrams_separated %>%
+  filter(!word1 %in% stop_words$word) %>%
+  filter(!word2 %in% stop_words$word)
+
+bigram_counts <- bigrams_filtered %>% 
+  count(word1, word2, sort = TRUE)
+
+bigram_graph <- bigram_counts %>%
+    filter(n >= 8) %>%
+    graph_from_data_frame()
+
+ggraph(bigram_graph, layout = "fr") +
+  geom_edge_link() +
+  geom_node_point() +
+  geom_node_text(aes(label = name), vjust = 1, hjust = 1)
+```
+
+#LDA
+```{r}
+
+tokend_train_dtm <- tokend_train %>%
+    count(game_type, word, sort=T) %>%
+    filter(!word %in% stop_words$word) %>%
+    cast_dtm(game_type, word, n)
+
+train_lda <- LDA(tokend_train_dtm, k=6)
+train_topic <- tidy(train_lda, matrix = "beta")
+train_top_terms <- train_topic %>%
+    group_by(topic) %>%
+    top_n(20, beta) %>%
+    ungroup %>%
+    arrange(topic, -beta)
+
+train_top_terms %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  labs(x=NULL) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip()
+```
+
